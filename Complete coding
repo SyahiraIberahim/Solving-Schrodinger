@@ -1,0 +1,163 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import root_scalar
+
+# Constants and Parameters
+hbar = 1  # Reduced Planck's constant
+m = 1     # Mass of the particle
+alpha = 1 # Alpha parameter
+lambda_val = 4 # Lambda parameter
+
+# Define the Potential Function
+def potential(x):
+    """Calculate the potential V(x) based on specified parameters."""
+    coeff = (hbar**2 / (2 * m)) * alpha**2 * lambda_val * (lambda_val - 1)
+    return coeff * (0.5 - 1 / (np.cosh(alpha * x)**2))
+
+# Implementation of the Numerov Method
+def numerov(psi_initial, psi_next, E, x, h):
+    """Integrate the wavefunction using the Numerov method for a given energy E."""
+    N = len(x)
+    psi = np.zeros(N)
+    psi[0], psi[1] = psi_initial, psi_next
+
+    f = lambda xi: 2 * m / hbar**2 * (E - potential(xi))
+
+    for i in range(1, N - 1):
+        k0, k1, k2 = f(x[i - 1]), f(x[i]), f(x[i + 1])
+        psi[i + 1] = (2 * (1 - 5 * h**2 * k1 / 12) * psi[i] - 
+                      (1 + h**2 * k0 / 12) * psi[i - 1]) / (1 + h**2 * k2 / 12)
+
+    return psi
+
+# Normalize Wavefunction
+def normalize_wavefunction(psi, x):
+    """Normalize the wavefunction psi over the spatial domain x."""
+    dx = x[1] - x[0]
+    normalization_factor = np.sqrt(np.sum(psi**2) * dx)
+    return psi / normalization_factor
+
+# Function to Check Matching Condition
+def check_matching_condition(E, x, h):
+    """Evaluate the matching condition at the turning point."""
+    N = len(x)
+
+    # Integrate wavefunction from both directions
+    left_psi = numerov(0.0, 1e-5, E, x, h)
+    right_psi = numerov(0.0, 1e-5, E, x[::-1], h)[::-1]
+
+    # Match at the midpoint
+    mid_index = N // 2
+    left_ratio = (left_psi[mid_index + 1] - left_psi[mid_index - 1]) / (2 * h * left_psi[mid_index])
+    right_ratio = (right_psi[mid_index + 1] - right_psi[mid_index - 1]) / (2 * h * right_psi[mid_index])
+
+    return left_ratio - right_ratio
+
+# Root-Finding for Eigenvalues
+def compute_eigenvalues(x, h, n_levels=5):
+    """Find the first n_levels eigenvalues using root-finding."""
+    eigenvalues_list = []
+    
+    # Define a range of energies to scan
+    energies_range = np.linspace(-10, 10, 1000)
+
+    for i in range(len(energies_range) - 1):
+        E_start, E_end = energies_range[i], energies_range[i + 1]
+
+        if check_matching_condition(E_start, x, h) * check_matching_condition(E_end, x, h) < 0:
+            result = root_scalar(check_matching_condition, args=(x, h), bracket=[E_start, E_end], method='brentq')
+            eigenvalues_list.append(result.root)
+
+            if len(eigenvalues_list) >= n_levels:
+                break
+
+    return eigenvalues_list
+
+# Function to Calculate Turning Points
+def find_turning_points(eigenvalues):
+    """Find turning points for given eigenvalues."""
+    turning_points = []
+    
+    for E in eigenvalues:
+        roots = []
+        # Check where V(x) is approximately equal to E
+        for xi in np.linspace(-10, 10, 1000): 
+            if np.isclose(potential(xi), E, atol=1e-5):  
+                roots.append(xi)
+        turning_points.append(roots)
+    
+    return turning_points
+
+# Main Execution Block
+if __name__ == "__main__":
+    x_min, x_max = -10, 10   # Range for x values
+    step_size = 0.05          # Step size for integration
+    x_values = np.arange(x_min, x_max + step_size, step_size)
+
+    # Find the first three eigenvalues
+    n_levels_to_find = 3
+    found_eigenvalues = compute_eigenvalues(x_values, step_size, n_levels=n_levels_to_find)
+
+    # Display results of numerical eigenvalues
+    print("Numerical Eigenvalues:")
+    for i, energy in enumerate(found_eigenvalues):
+        print(f"E_{i} = {energy:.6f}")
+
+    # Exact Eigenvalues for Comparison
+    exact_eigenvalues_calc = [(hbar**2 / (2 * m)) * alpha**2 *
+                               (lambda_val * (lambda_val - 1) / 2 - (lambda_val - 1 - n)**2)
+                               for n in range(n_levels_to_find)]
+    
+    print("\nExact Eigenvalues:")
+    for i, exact_energy in enumerate(exact_eigenvalues_calc):
+        print(f"E_{i} = {exact_energy:.6f}")
+
+    # Calculate and display Relative Errors
+    relative_errors = [abs((num - exact) / exact) for num, exact in zip(found_eigenvalues, exact_eigenvalues_calc)]
+    
+    print("\nRelative Errors:")
+    for i, err in enumerate(relative_errors):
+        print(f"Error for E_{i}: {err:.2%}")
+
+    # Find and display Turning Points
+    turning_points = find_turning_points(found_eigenvalues)
+    
+    print("\nTurning Points:")
+    for i, points in enumerate(turning_points):
+        print(f"Turning points for E_{i} = {found_eigenvalues[i]:.6f}: {points}")
+
+    # Plotting Potential Function
+    plt.figure(figsize=(8, 6))
+    
+    plt.plot(x_values, potential(x_values), label="Potential V(x)", color='grey')
+    
+    plt.xlabel("x")
+    plt.ylabel("Potential V(x)")
+    plt.title("Potential Function")
+    
+    plt.grid()
+    
+    plt.legend()
+    
+    plt.show()
+
+# Plotting Wavefunctions
+plt.figure(figsize=(8, 6))
+
+for i, energy in enumerate(found_eigenvalues):
+   normalized_psi = normalize_wavefunction(numerov(0.0, 1e-5, energy, x_values, step_size), x_values)
+   plt.plot(x_values,
+            normalized_psi / np.max(np.abs(normalized_psi)) + energy,
+            label=f"Eigenvalue E_{i} = {energy:.3f}")
+
+plt.xlabel("x")
+plt.ylabel("Normalized Wavefunction")
+plt.title("Wavefunctions")
+
+plt.xlim(-10, 10)
+
+plt.legend()
+
+plt.grid()
+
+plt.show()
